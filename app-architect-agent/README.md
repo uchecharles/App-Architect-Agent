@@ -1,101 +1,132 @@
-# 🏗️ App Architect Studio: Autonomous Codebase Orchestrator
+# ⚡ App-Architect-Agent
+> **Autonomous Full-Stack AI Engineer & Cloud Architecture Orchestrator**
 
-[![Deployed on Google Cloud Run](https://img.shields.io/badge/Deployed-Google%20Cloud%20Run-blue?logo=googlecloud)](https://app-architect-orchestrator-913336154788.us-central1.run.app)
-[![Powered by Google GenAI](https://img.shields.io/badge/Powered%20by-Google%20GenAI-orange?logo=google)](https://cloud.google.com/vertex-ai)
-[![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](https://opensource.org/licenses/MIT)
-
-**App Architect Studio** is an event-driven, headless AI agent designed to independently scaffold, configure, and package complete, production-ready full-stack architectures. 
-
-Built specifically for the **Taskmaster** hackathon track, it continuously listens for real-world triggers (such as GitHub Issues, Zapier events, or Discord messages), autonomously chains API actions, and delivers live preview environments without requiring human walkthroughs.
+An event-driven autonomous developer agent powered by Gemini 3.5 Flash on Google Cloud Run. App-Architect-Agent operates seamlessly across two environments: listening to GitHub issues as a headless Taskmaster, and providing a real-time Interactive Web Studio. It evaluates technical requirements, resolves missing architectural pillars via batched clarifications, and scaffolds production-ready full-stack applications with instant live previews and source code downloads.
 
 ---
 
-## 📖 Table of Contents
-- [The Taskmaster Engine (Autonomous Mode)](#-the-taskmaster-engine-autonomous-mode)
-- [System Architecture](#-system-architecture)
-- [Core Enterprise Features](#-core-enterprise-features)
-- [Tech Stack](#-tech-stack)
-- [Reproducible Setup](#-reproducible-setup)
-- [Setting up the Autonomous Webhook](#-setting-up-the-autonomous-webhook)
+## 🚀 Key Features
+
+* **Dual-Interface Orchestration:** Operates natively in two modes. It acts as a headless Taskmaster responding to GitHub webhook events, and as a Collaborative Partner accessed directly via a deployed Web Studio dashboard for interactive code generation.
+* **Architectural Ambiguity Detection:** Identifies missing foundational pillars (e.g., Web3 target ecosystems or Web2 persistence models) and requests batched clarification in a single professional turn before building.
+* **Stateful Multi-Turn Session Memory:** Tracks and resumes conversational sessions across stateless Cloud Run instances using Google Cloud Firestore, injecting unique `Session IDs` directly into GitHub comments and Web UI payloads.
+* **Unified API Gateway:** The Google Cloud Run Express server acts as a centralized brain, routing traffic from both the Web UI and GitHub issues through the exact same Vertex AI generation loops and Firestore memory banks.
+* **Enterprise Webhook Security:** Validates incoming payloads using raw-body HMAC-SHA256 signature verification (`X-Hub-Signature-256`) with strict timing-attack mitigation.
+* **Multi-Region Model Failover:** Implements dynamic fallback loops across multiple Google Cloud regions to ensure high availability and prevent quota-induced interruptions.
+* **LLM Edge-Case Safeguards:** Automatically intercepts and gracefully routes rogue plain-text hallucinations back into the stateful clarification loop, ensuring no webhook event or thread is ever dropped silently.
+* **Dual-Environment ZIP Packaging:** Dynamically bundles directory trees into `.zip` archives using Node.js `JSZip` for webhook downloads, and CDN-based client-side `JSZip` for Web Studio downloads—eliminating disk writes and optimizing server load.
+* **Isolated Live Previews:** Serves instant interactive UI previews through dedicated middleware without requiring external compiler instances.
 
 ---
 
-## 🤖 The Taskmaster Engine (Autonomous Mode)
+## 🛠️ Architecture & Tech Stack
 
-Unlike standard chatbot code generators that require constant user prompting, App Architect Studio operates as a **continuous background worker**. 
+```mermaid
+graph TD
+    classDef gcp fill:#4285F4,stroke:#fff,stroke-width:2px,color:#fff;
+    classDef github fill:#24292e,stroke:#fff,stroke-width:2px,color:#fff;
+    classDef user fill:#34A853,stroke:#fff,stroke-width:2px,color:#fff;
+    classDef ai fill:#EA4335,stroke:#fff,stroke-width:2px,color:#fff;
+    classDef web fill:#F4B400,stroke:#fff,stroke-width:2px,color:#fff;
 
-It self-triggers off external payloads using a dedicated webhook route (`/api/webhook/trigger`). When a user submits a project specification (e.g., by opening a new GitHub Issue), the agent:
-1. Catches the payload autonomously.
-2. Architects the `package.json`, `server.js`, and modular frontend structures.
-3. Implements strict **Twelve-Factor App** environment variable standards.
-4. Commits the fully structured codebase to Google Cloud Firestore.
-5. Generates a live, static preview URL and a downloadable `.zip` package.
+    %% 1. Define all node shapes first
+    User((Developer / User)):::user
+    GitHub[GitHub Repository]:::github
+    WebUI[Web Dashboard\nInteractive UI]:::web
+    CloudRun(Express API Gateway\nGoogle Cloud Run):::gcp
+    Firestore[(Cloud Firestore\nSession Memory)]:::gcp
+    VertexAI{Gemini 3.5 Flash\nVertex AI SDK}:::ai
+    ServerJSZip[Server-Side JSZip\nNode.js]
+    ClientJSZip[Client-Side JSZip\nBrowser CDN]:::web
 
----
+    %% 2. Map the connections
+    %% Path A: GitHub Webhook
+    User -->|1a. Creates Issue / Replies| GitHub
+    GitHub -->|Webhook Trigger\nHMAC-SHA256 Secured| CloudRun
 
-## 🗺️ System Architecture
+    %% Path B: Interactive Web UI
+    User -->|1b. Uses Web Studio| WebUI
+    WebUI -->|REST API Calls\n/build, /continue, /update| CloudRun
 
-```text
-[External Triggers]           [Cloud Run]                     [Google Cloud]
- GitHub Issues  ──┐                                          
- Discord Webhook ─┼─ POST ─> [ Express.js Backend ] ───> [@google/genai API]
- Zapier Event   ──┘                 │                          │
-                                    │ (App Scaffolding)        │ (LLM Logic)
-[Human-in-the-Loop]                 v                          │
- Web UI / Gateway ── POST ─> [ Active Session State ] <────────┘
-                                    │
-                                    v
-                             [ Firestore DB ] ──> Stores generated architectures
-                                    │
-                                    v
-[Delivery]                   [ Live Preview ] & [ Source Code .ZIP ]
+    subgraph Google Cloud Environment
+        CloudRun -->|2. Fetches/Saves Context| Firestore
+        CloudRun -->|3. Prompts AI via Fallback Loop| VertexAI
+        
+        VertexAI -.->|Tool Call: askUserForClarification| CloudRun
+        VertexAI -.->|Tool Call: buildFullStackApp| CloudRun
+        
+        CloudRun -.->|6a. /api/download/:id| ServerJSZip
+    end
+    
+    %% Client-Side Browser Logic
+    WebUI -.->|6b. Bundles JSON in Browser| ClientJSZip
+    
+    %% Payload Outputs
+    CloudRun -->|4a. Posts Links via API| GitHub
+    CloudRun -->|4b. Returns JSON Payload| WebUI
+    
+    %% Asset Delivery
+    GitHub -->|5a. Clicks Download .zip| CloudRun
+    User -->|5b. Clicks UI Download Button| WebUI
+    
+    ServerJSZip -->|Streams .zip Archive| User
+    ClientJSZip -->|Triggers Local Download| User
 
 ```
 
----
-
-## 🔐 Core Enterprise Features
-
-* **Continuous Improvement (CI/CD) Loop:** Because the application utilizes Firestore for stateful memory, it handles iterative updates dynamically. If a user replies to a GitHub Issue with new feature requests, the webhook fetches the existing architecture from the database, applies the diff via the GenAI SDK, and overwrites the static preview. It doesn't just chat—it continuously integrates.
-* **Zero-Hallucination Guardrails:** The agent is strictly forbidden from writing "sandbox" or mock connection logic. It writes raw `window.ethereum` try/catch blocks for Web3 dApps and raw `pg`/`stripe` modules for Web2 SaaS platforms.
-* **Twelve-Factor Secrets Management:** To maintain absolute security, the agent never asks users to input raw API keys into chat logs or UI forms. It automatically generates robust `.env.example` placeholders, shifting secret configuration to the secure deployment phase (e.g., Vercel, Heroku, or local `.env`).
-* **Asynchronous Clarification:** If an incoming prompt is critically ambiguous (e.g., missing the target blockchain ecosystem), the active session gracefully pauses, catches the necessary context via the HTTP continuation route, and seamlessly resumes the build pipeline.
+* **Core Runtime:** Node.js, Express, TypeScript
+* **AI Model & SDK:** Gemini 3.5 Flash via `@google/genai` (Vertex AI integration)
+* **Database & Persistence:** Google Cloud Firestore
+* **Compute & Hosting:** Google Cloud Run (Serverless Container)
+* **Packaging & Security:** JSZip, Node.js Crypto (Timing-Safe HMAC), Google Cloud Secret Manager
 
 ---
 
-## 🛠️ Tech Stack
+## 🚦 Local Development (CLI Mode)
 
-* **AI Engine:** Google Gemini (`@google/genai` unified SDK)
-* **Backend:** Node.js, Express.js
-* **Database:** Google Cloud Firestore
-* **Deployment:** Google Cloud Run (Serverless, Event-Driven)
-* **Frontend:** HTML5, Tailwind CSS, JSZip (Client-side packaging)
+You can run the agent locally with its built-in interactive multi-turn CLI:
 
----
-
-## 🚀 Reproducible Setup
-
-### 1. Local Development
-
-Clone the repository and install the dependencies:
+1. **Clone the repository:**
 
 ```bash
-git clone [https://github.com/your-username/app-architect-studio.git](https://github.com/your-username/app-architect-studio.git)
-cd app-architect-studio
+git clone [https://github.com/Ricks0ne/App-Architect-Agent.git](https://github.com/Ricks0ne/App-Architect-Agent.git)
+cd App-Architect-Agent
+
+```
+
+2. **Install dependencies:**
+
+```bash
 npm install
 
 ```
 
-Start the interactive local CLI engine:
+3. **Authenticate & Configure Environment:**
+Ensure you have the Google Cloud CLI installed, authenticate your local credentials, and create a `.env` file with your project ID:
+
+```bash
+gcloud auth application-default login
+echo "GOOGLE_CLOUD_PROJECT=your-project-id" > .env
+
+```
+
+*(Windows Users: You can manually create the `.env` file in the project root and add `GOOGLE_CLOUD_PROJECT=your-project-id` to it).*
+
+4. **Run the CLI Engine:**
 
 ```bash
 npm start
 
 ```
 
-### 2. Google Cloud Deployment
+---
 
-To deploy your own instance of the Orchestrator, use Google Cloud Run. The service relies on Application Default Credentials (ADC), eliminating the need for local `.json` key files.
+## ☁️ Deployment to Google Cloud Run
+
+This application utilizes Google Cloud Secret Manager for enterprise-grade security, ensuring API keys are never exposed in plaintext environment variables or revision histories.
+
+1. **Create Secrets:** In your GCP Console, navigate to Secret Manager and create two secrets named `github-token` and `github-webhook-secret` containing your actual credentials.
+2. **Deploy the Container:** Run the following command to deploy the orchestrator and securely mount the secrets:
 
 ```bash
 gcloud run deploy app-architect-orchestrator \
@@ -103,25 +134,27 @@ gcloud run deploy app-architect-orchestrator \
   --region us-central1 \
   --allow-unauthenticated \
   --max-instances=2 \
-  --min-instances=0
+  --min-instances=0 \
+  --no-cpu-throttling \
+  --remove-env-vars="GITHUB_TOKEN,GITHUB_WEBHOOK_SECRET" \
+  --set-secrets="GITHUB_TOKEN=github-token:latest,GITHUB_WEBHOOK_SECRET=github-webhook-secret:latest"
 
 ```
 
 ---
 
-## 📡 Setting up the Autonomous Webhook
+## 📖 Autonomous GitHub Workflow
 
-To enable continuous autonomous building via GitHub:
-
-1. Navigate to your target repository's **Settings > Webhooks**.
-2. Click **Add webhook**.
-3. Set the Payload URL to your deployed Cloud Run endpoint: `https://[YOUR-CLOUD-RUN-URL]/api/webhook/trigger`
-4. Set the Content type to `application/json`.
-5. Under "Which events would you like to trigger this webhook?", select **Let me select individual events**, and check **Issues**.
-6. Open a new issue with your application specifications in the body, and watch the agent build it silently in the background!
+1. **Create an Issue:** Open an issue in your repository describing your desired application (e.g., *"Build a decentralized token staking platform with a dark theme"*).
+2. **Clarification Turn (If Ambiguous):** If key architectural pillars are missing, the agent intercepts the build, replies with a structured checklist, and embeds a unique `Session ID`.
+3. **Resume Session:** Reply directly to the comment with your preferences. The agent parses the `Session ID`, loads the saved conversational state from Firestore, and resumes the workflow.
+4. **Instant Delivery:** Upon successful scaffolding, the agent posts a final comment containing the Firestore Record ID, an interactive Live Preview URL, and a direct `.zip` download link.
 
 ---
 
-## 👨‍💻 Maintainer
+## 🎨 Interactive Web Studio Workflow
 
-Built by **Ebubechukwu Fredrick Okolie** for the AI Agent Builder Hackathon.
+1. **Access the Dashboard:** Navigate to the deployed Cloud Run `.run.app` URL.
+2. **Initial Generation:** Enter your architectural requirements. The orchestrator will process the prompt through Vertex AI and return a live preview.
+3. **Iterative Refinement:** If the architecture needs adjustments, use the update input. The agent reads the existing in-memory file tree and surgically updates the specific components without losing prior context.
+4. **Live Preview & Export:** Interact directly with the rendered UI or download the `.zip` source code.
