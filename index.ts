@@ -67,7 +67,7 @@ const fallbackConfigs = [
   { location: 'europe-west1', model: 'gemini-3.5-flash' }
 ];
 
-// THE FINAL BRAIN: Twelve-Factor App + Environment-Aware Preview Logic + Strict Clarification
+// THE FINAL BRAIN: Twelve-Factor App + Environment-Aware Preview Logic + Strict Clarification + Multi-Image
 const systemInstruction = `You are an elite Senior Full-Stack Architect. Scaffold robust, production-ready codebases for ANY domain.
 
 CRITICAL DIRECTIVES:
@@ -84,6 +84,7 @@ CRITICAL DIRECTIVES:
    - For Web2: Target persistence/architecture model when ambiguous (e.g., Full-Stack with PostgreSQL vs. NoSQL/MongoDB vs. Pure Client-Side SPA) or missing core business domain.
    - UX RULE: Do NOT act like a chatty bot. Ask ALL required clarifying questions in a SINGLE, professional, bulleted message.
    - DEFAULT RULE: If the core purpose and foundational stack are provided (e.g., "React task manager with Postgres" or "Solana NFT staking UI"), do NOT ask follow-ups. Assume industry defaults for secondary tools (e.g., Tailwind CSS, Express, TypeScript) and immediately invoke 'buildFullStackApp'.
+8. MULTIMODAL & WIREFRAME SUPPORT: If the user provides wireframes, UI screenshots, or architectural diagrams, analyze the visual structure comprehensively. Replicate the component tree, layout hierarchy, and visual design precisely using modern frontend CSS (e.g., Tailwind, CSS Grid/Flexbox) to match the provided image frameworks in the generated application.
 
 Invoke 'buildFullStackApp' to generate the files.`;
 
@@ -95,7 +96,9 @@ declare module 'express-serve-static-core' {
 }
 
 const app = express();
+// Increase payload limit to handle multiple high-res base64 images
 app.use(express.json({
+  limit: '50mb',
   verify: (req, res, buf) => {
     req.rawBody = buf; // Capture raw body for HMAC verification
   }
@@ -411,13 +414,33 @@ app.post('/api/webhook/trigger', async (req, res) => {
 // 🚀 EVENT-DRIVEN CLOUD ORCHESTRATOR
 // ==========================================
 app.post('/api/agent/build', async (req, res) => {
-  const { prompt, appName } = req.body;
-  if (!prompt) return res.status(400).json({ error: "Missing 'prompt'" });
+  const { prompt, appName, images } = req.body;
+  
+  // Allow either a text prompt OR uploaded images
+  if (!prompt && (!images || images.length === 0)) {
+    return res.status(400).json({ error: "Missing 'prompt' or images" });
+  }
+
+  // Provide default instruction if generating exclusively from a wireframe
+  const safePrompt = prompt || "Analyze the provided visual framework and generate the corresponding application architecture.";
   
   try {
     let currentConfigIndex = 0;
     let result;
     let chat;
+
+    let messagePayload: any = safePrompt;
+    
+    if (images && Array.isArray(images) && images.length > 0) {
+      messagePayload = [{ text: safePrompt }];
+      images.forEach((img: any) => {
+        if (img.base64) {
+          messagePayload.push({
+            inlineData: { mimeType: img.mimeType || 'image/jpeg', data: img.base64 }
+          });
+        }
+      });
+    }
 
     while (true) {
       try {
@@ -425,7 +448,7 @@ app.post('/api/agent/build', async (req, res) => {
         const ai = new GoogleGenAI({ vertexai: true, project: projectId, location: config.location });
         chat = ai.chats.create({ model: config.model, config: { tools: agentTools as any, systemInstruction } });
         
-        result = await chat.sendMessage({ message: prompt });
+        result = await chat.sendMessage({ message: messagePayload });
         break; 
       } catch (err: any) {
         currentConfigIndex++;
@@ -440,10 +463,10 @@ app.post('/api/agent/build', async (req, res) => {
 });
 
 // ==========================================
-// 🔄 INTERACTIVE CONTINUATION ROUTE (Firestore State)
+// 🔄 INTERACTIVE CONTINUATION ROUTE (Firestore State + Hydration)
 // ==========================================
 app.post('/api/agent/continue', async (req, res) => {
-  const { sessionId, answer } = req.body;
+  const { sessionId, answer, images } = req.body;
   if (!sessionId) return res.status(400).json({ error: 'Session ID required.' });
 
   try {
@@ -456,19 +479,33 @@ app.post('/api/agent/continue', async (req, res) => {
     let result;
     let chat;
 
+    // 🛡️ RE-INJECT IMAGES: If the image was stripped from Firestore history, inject it directly into the current turn
+    let messagePayload: any = answer;
+    if (images && Array.isArray(images) && images.length > 0) {
+      messagePayload = [{ text: answer }];
+      images.forEach((img: any) => {
+        if (img.base64) {
+          messagePayload.push({
+            inlineData: { mimeType: img.mimeType || 'image/jpeg', data: img.base64 }
+          });
+        }
+      });
+    }
+
     while (true) {
       try {
         const config = fallbackConfigs[currentConfigIndex];
         const ai = new GoogleGenAI({ vertexai: true, project: projectId, location: config.location });
         
-        // Rebuild the chat session using the history retrieved from Firestore
+        // Rebuild the chat session using the cleanly stripped history retrieved from Firestore
         chat = ai.chats.create({ 
           model: config.model, 
           history: sessionData?.history || [],
           config: { tools: agentTools as any, systemInstruction } 
         });
 
-        result = await chat.sendMessage({ message: answer });
+        // The model receives the user's text answer AND the re-injected visual framework
+        result = await chat.sendMessage({ message: messagePayload });
         break;
       } catch (err: any) {
         currentConfigIndex++;
@@ -486,8 +523,17 @@ app.post('/api/agent/continue', async (req, res) => {
 // 🛠️ ITERATIVE UPDATE ROUTE
 // ==========================================
 app.post('/api/agent/update', async (req, res) => {
-  const { documentId, updatePrompt } = req.body;
-  if (!documentId || !updatePrompt) return res.status(400).json({ error: "Missing documentId or prompt" });
+  const { documentId, updatePrompt, images } = req.body;
+  
+  if (!documentId) return res.status(400).json({ error: "Missing documentId" });
+  
+  // Allow either text instructions OR an updated wireframe
+  if (!updatePrompt && (!images || images.length === 0)) {
+    return res.status(400).json({ error: "Missing update instruction or images" });
+  }
+
+  // Default instruction if updating entirely via wireframe
+  const safeUpdatePrompt = updatePrompt || "Implement the UI/UX updates shown in the provided visual reference.";
 
   try {
     const docRef = db.collection('generated_fullstack_apps').doc(documentId);
@@ -503,7 +549,19 @@ app.post('/api/agent/update', async (req, res) => {
       codeContext += `--- FILE: ${file.filename} ---\n${file.code}\n\n`;
     });
 
-    const agentPrompt = `You are updating an existing codebase.\n\n${codeContext}\n\nUSER UPDATE REQUEST: ${updatePrompt}\n\nCRITICAL INSTRUCTION: You MUST invoke the 'buildFullStackApp' tool and output the ENTIRE updated codebase. Include ALL files (both the ones you modified and the ones you left completely untouched). If you omit a file, it will be deleted from the user's project.`;
+    const agentPrompt = `You are updating an existing codebase.\n\n${codeContext}\n\nUSER UPDATE REQUEST: ${safeUpdatePrompt}\n\nCRITICAL INSTRUCTION: You MUST invoke the 'buildFullStackApp' tool and output the ENTIRE updated codebase. Include ALL files (both the ones you modified and the ones you left completely untouched). If you omit a file, it will be deleted from the user's project.`;
+
+    let messagePayload: any = agentPrompt;
+    if (images && Array.isArray(images) && images.length > 0) {
+      messagePayload = [{ text: agentPrompt }];
+      images.forEach((img: any) => {
+        if (img.base64) {
+          messagePayload.push({
+            inlineData: { mimeType: img.mimeType || 'image/jpeg', data: img.base64 }
+          });
+        }
+      });
+    }
 
     let currentConfigIndex = 0;
     let result;
@@ -515,7 +573,7 @@ app.post('/api/agent/update', async (req, res) => {
         const ai = new GoogleGenAI({ vertexai: true, project: projectId, location: config.location });
         chat = ai.chats.create({ model: config.model, config: { tools: agentTools as any, systemInstruction } });
         
-        result = await chat.sendMessage({ message: agentPrompt });
+        result = await chat.sendMessage({ message: messagePayload });
         break; 
       } catch (err: any) {
         currentConfigIndex++;
@@ -530,18 +588,33 @@ app.post('/api/agent/update', async (req, res) => {
   }
 });
 
+// 🛡️ FIRESTORE PAYLOAD PROTECTOR (1MB LIMIT FIX)
 async function handleAgentResponse(result: any, chat: any, appName: string, res: express.Response, existingSessionId?: string, targetDocumentId?: string) {
   const parts = result.candidates?.[0]?.content?.parts || [];
   const call = parts.find((p: any) => p.functionCall)?.functionCall;
+
+  // Helper to safely strip Base64 images before hitting Firestore 1MB limits
+  const getSafeHistory = async () => {
+    const rawHistory = await chat.getHistory();
+    return JSON.parse(JSON.stringify(rawHistory)).map((turn: any) => {
+      if (turn.parts) {
+        turn.parts = turn.parts.map((part: any) => {
+          if (part.inlineData) return { text: "[Visual framework processed - image bytes omitted to clear Firestore 1MB limit]" };
+          return part;
+        });
+      }
+      return turn;
+    });
+  };
 
   if (call) {
     const sessionId = existingSessionId || randomUUID();
     
     if (call.name === "askUserForClarification") {
-      // 💾 Save session context to Firestore to survive Cloud Run instance shifting
-      const history = await chat.getHistory();
+      // 💾 Save safe session context to Firestore to survive Cloud Run instance shifting
+      const safeHistory = await getSafeHistory();
       await db.collection('agent_sessions').doc(sessionId).set({
-        history: history, 
+        history: safeHistory, 
         appName: appName,
         targetDocumentId: targetDocumentId || null,
         updatedAt: new Date()
@@ -591,9 +664,9 @@ async function handleAgentResponse(result: any, chat: any, appName: string, res:
   const fallbackText = parts.find((p: any) => p.text)?.text;
   if (!call && fallbackText) {
     const sessionId = existingSessionId || randomUUID();
-    const history = await chat.getHistory();
+    const safeHistory = await getSafeHistory();
     await db.collection('agent_sessions').doc(sessionId).set({
-      history: history, 
+      history: safeHistory, 
       appName: appName,
       targetDocumentId: targetDocumentId || null,
       updatedAt: new Date()
