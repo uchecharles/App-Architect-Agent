@@ -79,8 +79,8 @@ You can run the agent locally with its built-in interactive multi-turn CLI:
 
 1. **Clone the repository:**
 
-```bash
-git clone https://github.com/Ricks0ne/App-Architect-Agent.git
+```bash[
+git clone https://github.com/uchecharles/App-Architect-Agent.git
 cd App-Architect-Agent
 
 ```
